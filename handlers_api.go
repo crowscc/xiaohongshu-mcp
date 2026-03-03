@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/xpzouying/xiaohongshu-mcp/cookies"
 	"github.com/xpzouying/xiaohongshu-mcp/xiaohongshu"
@@ -292,4 +293,58 @@ func (s *AppServer) myProfileHandler(c *gin.Context) {
 
 	c.Set("account", "ai-report")
 	respondSuccess(c, map[string]any{"data": result}, "获取我的主页成功")
+}
+
+// getCommentNotificationsHandler 获取评论通知
+func (s *AppServer) getCommentNotificationsHandler(c *gin.Context) {
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	result, err := s.xiaohongshuService.GetCommentNotifications(c.Request.Context(), limit)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "NOTIFICATION_ERROR", "获取评论通知失败", err.Error())
+		return
+	}
+	respondSuccess(c, result, "获取评论通知成功")
+}
+
+// replyNotificationCommentHandler 回复通知评论
+func (s *AppServer) replyNotificationCommentHandler(c *gin.Context) {
+	var req struct {
+		CommentID string `json:"comment_id" binding:"required"`
+		Content   string `json:"content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "INVALID_REQUEST", "请求参数错误", err.Error())
+		return
+	}
+
+	err := s.xiaohongshuService.ReplyNotificationComment(c.Request.Context(), req.CommentID, req.Content)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "REPLY_ERROR", "回复评论失败", err.Error())
+		return
+	}
+	respondSuccess(c, nil, "回复评论成功")
+}
+
+// likeNotificationCommentHandler 点赞通知评论
+func (s *AppServer) likeNotificationCommentHandler(c *gin.Context) {
+	var req struct {
+		CommentID string `json:"comment_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "INVALID_REQUEST", "请求参数错误", err.Error())
+		return
+	}
+
+	err := s.xiaohongshuService.LikeNotificationComment(c.Request.Context(), req.CommentID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "LIKE_ERROR", "点赞评论失败", err.Error())
+		return
+	}
+	respondSuccess(c, nil, "点赞评论成功")
 }

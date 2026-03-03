@@ -51,6 +51,9 @@ func setupRoutes(appServer *AppServer) *gin.Engine {
 		api.POST("/feeds/comment", appServer.postCommentHandler)
 		api.POST("/feeds/comment/reply", appServer.replyCommentHandler)
 		api.GET("/user/me", appServer.myProfileHandler)
+		api.GET("/notifications/comments", appServer.getCommentNotificationsHandler)
+		api.POST("/notifications/comments/reply", appServer.replyNotificationCommentHandler)
+		api.POST("/notifications/comments/like", appServer.likeNotificationCommentHandler)
 	}
 
 	return router

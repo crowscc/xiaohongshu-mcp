@@ -724,3 +724,81 @@ func (s *AppServer) handleReplyComment(ctx context.Context, args map[string]inte
 		}},
 	}
 }
+
+// handleGetCommentNotifications 处理获取评论通知
+func (s *AppServer) handleGetCommentNotifications(ctx context.Context, args GetCommentNotificationsArgs) *MCPToolResult {
+	logrus.Info("MCP: 获取评论通知")
+
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	result, err := s.xiaohongshuService.GetCommentNotifications(ctx, limit)
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "获取评论通知失败: " + err.Error()}},
+			IsError: true,
+		}
+	}
+
+	jsonData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("获取评论通知成功，但序列化失败: %v", err)}},
+			IsError: true,
+		}
+	}
+
+	return &MCPToolResult{
+		Content: []MCPContent{{Type: "text", Text: string(jsonData)}},
+	}
+}
+
+// handleReplyNotificationComment 处理回复通知评论
+func (s *AppServer) handleReplyNotificationComment(ctx context.Context, args ReplyNotificationCommentArgs) *MCPToolResult {
+	logrus.Infof("MCP: 回复通知评论 - CommentID: %s", args.CommentID)
+
+	if args.CommentID == "" || args.Content == "" {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "回复失败: comment_id 和 content 不能为空"}},
+			IsError: true,
+		}
+	}
+
+	err := s.xiaohongshuService.ReplyNotificationComment(ctx, args.CommentID, args.Content)
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "回复通知评论失败: " + err.Error()}},
+			IsError: true,
+		}
+	}
+
+	return &MCPToolResult{
+		Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("回复通知评论成功 - CommentID: %s", args.CommentID)}},
+	}
+}
+
+// handleLikeNotificationComment 处理点赞通知评论
+func (s *AppServer) handleLikeNotificationComment(ctx context.Context, args LikeNotificationCommentArgs) *MCPToolResult {
+	logrus.Infof("MCP: 点赞通知评论 - CommentID: %s", args.CommentID)
+
+	if args.CommentID == "" {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "点赞失败: comment_id 不能为空"}},
+			IsError: true,
+		}
+	}
+
+	err := s.xiaohongshuService.LikeNotificationComment(ctx, args.CommentID)
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: "点赞通知评论失败: " + err.Error()}},
+			IsError: true,
+		}
+	}
+
+	return &MCPToolResult{
+		Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("点赞通知评论成功 - CommentID: %s", args.CommentID)}},
+	}
+}

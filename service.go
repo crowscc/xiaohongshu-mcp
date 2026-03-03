@@ -91,6 +91,12 @@ type UserProfileResponse struct {
 	Feeds         []xiaohongshu.Feed             `json:"feeds"`
 }
 
+// CommentNotificationsResponse 评论通知列表响应
+type CommentNotificationsResponse struct {
+	Notifications []xiaohongshu.CommentNotification `json:"notifications"`
+	Count         int                                `json:"count"`
+}
+
 // DeleteCookies 删除 cookies 文件，用于登录重置
 func (s *XiaohongshuService) DeleteCookies(ctx context.Context) error {
 	cookiePath := cookies.GetCookiesFilePath()
@@ -614,4 +620,48 @@ func (s *XiaohongshuService) GetMyProfile(ctx context.Context) (*UserProfileResp
 	}
 
 	return response, nil
+}
+
+// GetCommentNotifications 获取评论通知列表
+func (s *XiaohongshuService) GetCommentNotifications(ctx context.Context, limit int) (*CommentNotificationsResponse, error) {
+	b := newBrowser()
+	defer b.Close()
+
+	page := b.NewPage()
+	defer page.Close()
+
+	action := xiaohongshu.NewNotificationAction(page)
+	notifications, err := action.GetCommentNotifications(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return &CommentNotificationsResponse{
+		Notifications: notifications,
+		Count:         len(notifications),
+	}, nil
+}
+
+// ReplyNotificationComment 回复通知页评论
+func (s *XiaohongshuService) ReplyNotificationComment(ctx context.Context, commentID, content string) error {
+	b := newBrowser()
+	defer b.Close()
+
+	page := b.NewPage()
+	defer page.Close()
+
+	action := xiaohongshu.NewNotificationAction(page)
+	return action.ReplyNotificationComment(ctx, commentID, content)
+}
+
+// LikeNotificationComment 点赞通知页评论
+func (s *XiaohongshuService) LikeNotificationComment(ctx context.Context, commentID string) error {
+	b := newBrowser()
+	defer b.Close()
+
+	page := b.NewPage()
+	defer page.Close()
+
+	action := xiaohongshu.NewNotificationAction(page)
+	return action.LikeNotificationComment(ctx, commentID)
 }

@@ -98,6 +98,22 @@ type FavoriteFeedArgs struct {
 	Unfavorite bool   `json:"unfavorite,omitempty" jsonschema:"是否取消收藏，true为取消收藏，false或未设置则为收藏"`
 }
 
+// GetCommentNotificationsArgs 获取评论通知的参数
+type GetCommentNotificationsArgs struct {
+	Limit int `json:"limit,omitempty" jsonschema:"获取通知数量限制（可选），默认20，0表示不限制"`
+}
+
+// ReplyNotificationCommentArgs 回复通知评论的参数
+type ReplyNotificationCommentArgs struct {
+	CommentID string `json:"comment_id" jsonschema:"评论标识，从评论通知列表的 commentId 字段获取"`
+	Content   string `json:"content" jsonschema:"回复内容"`
+}
+
+// LikeNotificationCommentArgs 点赞通知评论的参数
+type LikeNotificationCommentArgs struct {
+	CommentID string `json:"comment_id" jsonschema:"评论标识，从评论通知列表的 commentId 字段获取"`
+}
+
 // InitMCPServer 初始化 MCP Server
 func InitMCPServer(appServer *AppServer) *mcp.Server {
 	// 创建 MCP Server
@@ -439,7 +455,55 @@ func registerTools(server *mcp.Server, appServer *AppServer) {
 		}),
 	)
 
-	logrus.Infof("Registered %d MCP tools", 13)
+	// 工具 14: 获取评论通知
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:        "get_comment_notifications",
+			Description: "获取小红书通知页的评论通知列表，返回评论者、评论内容、被评论笔记等信息",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "Get Comment Notifications",
+				ReadOnlyHint: true,
+			},
+		},
+		withPanicRecovery("get_comment_notifications", func(ctx context.Context, req *mcp.CallToolRequest, args GetCommentNotificationsArgs) (*mcp.CallToolResult, any, error) {
+			result := appServer.handleGetCommentNotifications(ctx, args)
+			return convertToMCPResult(result), nil, nil
+		}),
+	)
+
+	// 工具 15: 回复通知评论
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:        "reply_notification_comment",
+			Description: "在通知页回复指定评论",
+			Annotations: &mcp.ToolAnnotations{
+				Title:           "Reply Notification Comment",
+				DestructiveHint: boolPtr(true),
+			},
+		},
+		withPanicRecovery("reply_notification_comment", func(ctx context.Context, req *mcp.CallToolRequest, args ReplyNotificationCommentArgs) (*mcp.CallToolResult, any, error) {
+			result := appServer.handleReplyNotificationComment(ctx, args)
+			return convertToMCPResult(result), nil, nil
+		}),
+	)
+
+	// 工具 16: 点赞通知评论
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:        "like_notification_comment",
+			Description: "在通知页点赞指定评论",
+			Annotations: &mcp.ToolAnnotations{
+				Title:           "Like Notification Comment",
+				DestructiveHint: boolPtr(true),
+			},
+		},
+		withPanicRecovery("like_notification_comment", func(ctx context.Context, req *mcp.CallToolRequest, args LikeNotificationCommentArgs) (*mcp.CallToolResult, any, error) {
+			result := appServer.handleLikeNotificationComment(ctx, args)
+			return convertToMCPResult(result), nil, nil
+		}),
+	)
+
+	logrus.Infof("Registered %d MCP tools", 16)
 }
 
 // convertToMCPResult 将自定义的 MCPToolResult 转换为官方 SDK 的格式

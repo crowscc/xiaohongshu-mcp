@@ -168,3 +168,17 @@ type UserInteractions struct {
 	Name  string `json:"name"`  // 关注 粉丝 获赞与收藏
 	Count string `json:"count"` // 数量
 }
+
+// ================ 通知页相关结构体 ================
+
+// CommentNotification 评论通知
+type CommentNotification struct {
+	CommentID  string `json:"commentId"`
+	UserName   string `json:"userName"`
+	UserAvatar string `json:"userAvatar"`
+	Content    string `json:"content"`
+	NoteTitle  string `json:"noteTitle"`
+	NoteID     string `json:"noteId"`
+	Time       string `json:"time"`
+	IsReply    bool   `json:"isReply"`
+}
