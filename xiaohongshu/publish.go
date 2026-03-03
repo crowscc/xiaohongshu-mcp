@@ -67,15 +67,15 @@ func NewPublishImageAction(page *rod.Page) (*PublishAction, error) {
 	}, nil
 }
 
-func (p *PublishAction) Publish(ctx context.Context, content PublishImageContent) error {
+func (p *PublishAction) Publish(ctx context.Context, content PublishImageContent) (string, error) {
 	if len(content.ImagePaths) == 0 {
-		return errors.New("图片不能为空")
+		return "", errors.New("图片不能为空")
 	}
 
 	page := p.page.Context(ctx)
 
 	if err := uploadImages(page, content.ImagePaths); err != nil {
-		return errors.Wrap(err, "小红书上传图片失败")
+		return "", errors.Wrap(err, "小红书上传图片失败")
 	}
 
 	tags := content.Tags
@@ -86,11 +86,12 @@ func (p *PublishAction) Publish(ctx context.Context, content PublishImageContent
 
 	logrus.Infof("发布内容: title=%s, images=%v, tags=%v, schedule=%v, original=%v, visibility=%s", content.Title, len(content.ImagePaths), tags, content.ScheduleTime, content.IsOriginal, content.Visibility)
 
-	if err := submitPublish(page, content.Title, content.Content, tags, content.ScheduleTime, content.IsOriginal, content.Visibility); err != nil {
-		return errors.Wrap(err, "小红书发布失败")
+	noteID, err := submitPublish(page, content.Title, content.Content, tags, content.ScheduleTime, content.IsOriginal, content.Visibility)
+	if err != nil {
+		return "", errors.Wrap(err, "小红书发布失败")
 	}
 
-	return nil
+	return noteID, nil
 }
 
 func removePopCover(page *rod.Page) {
@@ -270,19 +271,19 @@ func waitForUploadComplete(page *rod.Page, expectedCount int) error {
 	return errors.Errorf("第%d张图片上传超时(60s)，请检查网络连接和图片大小", expectedCount)
 }
 
-func submitPublish(page *rod.Page, title, content string, tags []string, scheduleTime *time.Time, isOriginal bool, visibility string) error {
+func submitPublish(page *rod.Page, title, content string, tags []string, scheduleTime *time.Time, isOriginal bool, visibility string) (string, error) {
 	titleElem, err := page.Element("div.d-input input")
 	if err != nil {
-		return errors.Wrap(err, "查找标题输入框失败")
+		return "", errors.Wrap(err, "查找标题输入框失败")
 	}
 	if err := titleElem.Input(title); err != nil {
-		return errors.Wrap(err, "输入标题失败")
+		return "", errors.Wrap(err, "输入标题失败")
 	}
 
 	// 检查标题长度
 	time.Sleep(500 * time.Millisecond)
 	if err := checkTitleMaxLength(page); err != nil {
-		return err
+		return "", err
 	}
 	slog.Info("检查标题长度：通过")
 
@@ -290,37 +291,37 @@ func submitPublish(page *rod.Page, title, content string, tags []string, schedul
 
 	contentElem, ok := getContentElement(page)
 	if !ok {
-		return errors.New("没有找到内容输入框")
+		return "", errors.New("没有找到内容输入框")
 	}
 	if err := contentElem.Input(content); err != nil {
-		return errors.Wrap(err, "输入正文失败")
+		return "", errors.Wrap(err, "输入正文失败")
 	}
 	if err := waitAndClickTitleInput(titleElem); err != nil {
-		return err
+		return "", err
 	}
 	if err := inputTags(contentElem, tags); err != nil {
-		return err
+		return "", err
 	}
 
 	time.Sleep(1 * time.Second)
 
 	// 检查正文长度
 	if err := checkContentMaxLength(page); err != nil {
-		return err
+		return "", err
 	}
 	slog.Info("检查正文长度：通过")
 
 	// 处理定时发布
 	if scheduleTime != nil {
 		if err := setSchedulePublish(page, *scheduleTime); err != nil {
-			return errors.Wrap(err, "设置定时发布失败")
+			return "", errors.Wrap(err, "设置定时发布失败")
 		}
 		slog.Info("定时发布设置完成", "schedule_time", scheduleTime.Format("2006-01-02 15:04"))
 	}
 
 	// 设置可见范围
 	if err := setVisibility(page, visibility); err != nil {
-		return errors.Wrap(err, "设置可见范围失败")
+		return "", errors.Wrap(err, "设置可见范围失败")
 	}
 
 	// 处理原创声明
@@ -334,14 +335,22 @@ func submitPublish(page *rod.Page, title, content string, tags []string, schedul
 
 	submitButton, err := page.Element(".publish-page-publish-btn button.bg-red")
 	if err != nil {
-		return errors.Wrap(err, "查找发布按钮失败")
+		return "", errors.Wrap(err, "查找发布按钮失败")
 	}
 	if err := submitButton.Click(proto.InputMouseButtonLeft, 1); err != nil {
-		return errors.Wrap(err, "点击发布按钮失败")
+		return "", errors.Wrap(err, "点击发布按钮失败")
 	}
 
+	// 点击发布按钮后等待页面跳转，提取 noteId
 	time.Sleep(3 * time.Second)
-	return nil
+
+	noteID, err := extractNoteIDAfterPublish(page)
+	if err != nil {
+		logrus.Warnf("提取 noteId 失败: %v，发布可能已成功但无法获取 noteId", err)
+		return "", nil // 发布成功但无法获取 noteId，不视为错误
+	}
+
+	return noteID, nil
 }
 
 // waitAndClickTitleInput 在填写正文后等待 1 秒并回点标题输入框，增强后续交互稳定性
@@ -749,6 +758,64 @@ func setOriginal(page *rod.Page) error {
 	}
 
 	return errors.New("未找到原创声明选项")
+}
+
+// extractNoteIDAfterPublish 发布成功后从页面提取 noteId
+func extractNoteIDAfterPublish(page *rod.Page) (string, error) {
+	maxWait := 10 * time.Second
+	interval := 500 * time.Millisecond
+	start := time.Now()
+
+	for time.Since(start) < maxWait {
+		info := page.MustInfo()
+		currentURL := info.URL
+
+		// 方式1: URL 中包含 noteId 参数
+		if strings.Contains(currentURL, "noteId=") {
+			parts := strings.Split(currentURL, "noteId=")
+			if len(parts) > 1 {
+				noteID := strings.Split(parts[1], "&")[0]
+				if noteID != "" {
+					logrus.Infof("从 URL 提取到 noteId: %s", noteID)
+					return noteID, nil
+				}
+			}
+		}
+
+		// 方式2: URL 中包含 /explore/ 路径 (笔记详情页)
+		if strings.Contains(currentURL, "/explore/") {
+			parts := strings.Split(currentURL, "/explore/")
+			if len(parts) > 1 {
+				noteID := strings.Split(parts[1], "?")[0]
+				if noteID != "" {
+					logrus.Infof("从详情页 URL 提取到 noteId: %s", noteID)
+					return noteID, nil
+				}
+			}
+		}
+
+		time.Sleep(interval)
+	}
+
+	// 方式3: 从页面 DOM 提取（创作者后台的发布成功页）
+	noteIDResult, err := page.Eval(`() => {
+		const links = document.querySelectorAll('a[href*="/explore/"]');
+		for (const link of links) {
+			const href = link.getAttribute('href');
+			const match = href.match(/\/explore\/([a-f0-9]+)/);
+			if (match) return match[1];
+		}
+		return "";
+	}`)
+	if err == nil {
+		noteID := noteIDResult.Value.Str()
+		if noteID != "" {
+			logrus.Infof("从 DOM 提取到 noteId: %s", noteID)
+			return noteID, nil
+		}
+	}
+
+	return "", errors.New("无法从页面提取 noteId")
 }
 
 // confirmOriginalDeclaration 处理原创声明确认弹窗
