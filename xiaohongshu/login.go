@@ -2,6 +2,7 @@ package xiaohongshu
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -98,4 +99,27 @@ func (a *LoginAction) WaitForLogin(ctx context.Context) bool {
 			}
 		}
 	}
+}
+
+// ExtractUsername 从已登录页面提取当前用户名
+func (a *LoginAction) ExtractUsername(ctx context.Context) (string, error) {
+	pp := a.page.Context(ctx)
+
+	// 侧边栏用户名元素
+	el, err := pp.Timeout(5 * time.Second).Element(".main-container .user .link-wrapper .channel")
+	if err != nil {
+		return "", errors.Wrap(err, "未找到用户名元素")
+	}
+
+	text, err := el.Text()
+	if err != nil {
+		return "", errors.Wrap(err, "获取用户名文本失败")
+	}
+
+	username := strings.TrimSpace(text)
+	if username == "" {
+		return "", errors.New("用户名为空")
+	}
+
+	return username, nil
 }

@@ -115,7 +115,17 @@ func (s *XiaohongshuService) CheckLoginStatus(ctx context.Context) (*LoginStatus
 
 	response := &LoginStatusResponse{
 		IsLoggedIn: isLoggedIn,
-		Username:   configs.Username,
+	}
+
+	// 已登录时提取真实用户名
+	if isLoggedIn {
+		username, err := loginAction.ExtractUsername(ctx)
+		if err != nil {
+			logrus.Warnf("提取用户名失败，使用默认值: %v", err)
+			response.Username = configs.Username
+		} else {
+			response.Username = username
+		}
 	}
 
 	return response, nil
@@ -152,6 +162,14 @@ func (s *XiaohongshuService) GetLoginQrcode(ctx context.Context) (*LoginQrcodeRe
 			if loginAction.WaitForLogin(ctxTimeout) {
 				if er := saveCookies(page); er != nil {
 					logrus.Errorf("failed to save cookies: %v", er)
+				}
+
+				// 登录成功后提取用户名
+				username, err := loginAction.ExtractUsername(ctxTimeout)
+				if err != nil {
+					logrus.Warnf("登录后提取用户名失败: %v", err)
+				} else {
+					logrus.Infof("登录用户: %s", username)
 				}
 			}
 		}()
