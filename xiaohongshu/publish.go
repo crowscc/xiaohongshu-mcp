@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -771,14 +772,10 @@ func extractNoteIDAfterPublish(page *rod.Page) (string, error) {
 		currentURL := info.URL
 
 		// 方式1: URL 中包含 noteId 参数
-		if strings.Contains(currentURL, "noteId=") {
-			parts := strings.Split(currentURL, "noteId=")
-			if len(parts) > 1 {
-				noteID := strings.Split(parts[1], "&")[0]
-				if noteID != "" {
-					logrus.Infof("从 URL 提取到 noteId: %s", noteID)
-					return noteID, nil
-				}
+		if parsedURL, parseErr := url.Parse(currentURL); parseErr == nil {
+			if noteID := parsedURL.Query().Get("noteId"); noteID != "" {
+				logrus.Infof("从 URL 提取到 noteId: %s", noteID)
+				return noteID, nil
 			}
 		}
 
@@ -787,6 +784,7 @@ func extractNoteIDAfterPublish(page *rod.Page) (string, error) {
 			parts := strings.Split(currentURL, "/explore/")
 			if len(parts) > 1 {
 				noteID := strings.Split(parts[1], "?")[0]
+				noteID = strings.Split(noteID, "#")[0]
 				if noteID != "" {
 					logrus.Infof("从详情页 URL 提取到 noteId: %s", noteID)
 					return noteID, nil

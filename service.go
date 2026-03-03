@@ -169,14 +169,6 @@ func (s *XiaohongshuService) GetLoginQrcode(ctx context.Context) (*LoginQrcodeRe
 				if er := saveCookies(page); er != nil {
 					logrus.Errorf("failed to save cookies: %v", er)
 				}
-
-				// 登录成功后提取用户名
-				username, err := loginAction.ExtractUsername(ctxTimeout)
-				if err != nil {
-					logrus.Warnf("登录后提取用户名失败: %v", err)
-				} else {
-					logrus.Infof("登录用户: %s", username)
-				}
 			}
 		}()
 	}

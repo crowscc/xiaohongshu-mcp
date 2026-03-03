@@ -29,7 +29,7 @@ func (a *LoginAction) CheckLoginStatus(ctx context.Context) (bool, error) {
 	}
 
 	if !exists {
-		return false, errors.Wrap(err, "login status element not found")
+		return false, errors.New("login status element not found")
 	}
 
 	return true, nil
@@ -105,21 +105,33 @@ func (a *LoginAction) WaitForLogin(ctx context.Context) bool {
 func (a *LoginAction) ExtractUsername(ctx context.Context) (string, error) {
 	pp := a.page.Context(ctx)
 
-	// 侧边栏用户名元素
-	el, err := pp.Timeout(5 * time.Second).Element(".main-container .user .link-wrapper .channel")
+	// 点击侧边栏"我"进入个人主页
+	profileLink, err := pp.Timeout(5 * time.Second).Element(`div.main-container li.user.side-bar-component a.link-wrapper span.channel`)
 	if err != nil {
-		return "", errors.Wrap(err, "未找到用户名元素")
+		return "", errors.Wrap(err, "未找到侧边栏用户入口")
 	}
+	profileLink.MustClick()
+	pp.MustWaitLoad()
+	time.Sleep(1 * time.Second)
 
-	text, err := el.Text()
-	if err != nil {
-		return "", errors.Wrap(err, "获取用户名文本失败")
-	}
+	// 从 __INITIAL_STATE__ 提取昵称
+	nickname := pp.MustEval(`() => {
+		try {
+			const state = window.__INITIAL_STATE__;
+			if (state && state.user && state.user.userPageData) {
+				const data = state.user.userPageData.value || state.user.userPageData._value;
+				if (data && data.basicInfo && data.basicInfo.nickname) {
+					return data.basicInfo.nickname;
+				}
+			}
+		} catch(e) {}
+		return "";
+	}`).String()
 
-	username := strings.TrimSpace(text)
-	if username == "" {
+	nickname = strings.TrimSpace(nickname)
+	if nickname == "" {
 		return "", errors.New("用户名为空")
 	}
 
-	return username, nil
+	return nickname, nil
 }
