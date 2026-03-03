@@ -125,8 +125,7 @@ func extractCommentNotifications(page *rod.Page, limit int) ([]CommentNotificati
 	}
 
 	if len(items) == 0 {
-		dumpNotificationPageDOM(page)
-		return nil, fmt.Errorf("未找到通知列表元素，可能小红书更新了页面结构，debug 信息已输出到日志")
+		return nil, fmt.Errorf("未找到通知列表元素，可能小红书更新了页面结构")
 	}
 
 	var notifications []CommentNotification
@@ -322,29 +321,3 @@ func findNotificationComment(page *rod.Page, commentID string) (*rod.Element, er
 	return nil, fmt.Errorf("未找到评论: %s", commentID)
 }
 
-// dumpNotificationPageDOM 用 go-rod 原生方式 dump 通知页 DOM 结构，用于远程调试
-func dumpNotificationPageDOM(page *rod.Page) {
-	// 用一小段 JS 仅做结构 dump（纯读取，不做业务逻辑）
-	result, err := page.Eval(`() => {
-		const root = document.querySelector('.notification-page') || document.querySelector('#app') || document.body;
-		if (!root) return 'NO_ROOT';
-		function walk(el, depth) {
-			if (depth > 4 || !el || !el.tagName) return '';
-			const tag = el.tagName.toLowerCase();
-			const cls = el.className && typeof el.className === 'string'
-				? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.')
-				: '';
-			let line = '  '.repeat(depth) + tag + cls + '[' + el.children.length + ']\n';
-			for (let i = 0; i < Math.min(el.children.length, 10); i++) {
-				line += walk(el.children[i], depth + 1);
-			}
-			return line;
-		}
-		return walk(root, 0);
-	}`)
-	if err != nil {
-		logrus.Warnf("dump 通知页 DOM 失败: %v", err)
-		return
-	}
-	logrus.Warnf("通知页 DOM 结构:\n%s", result.Value.Str())
-}
