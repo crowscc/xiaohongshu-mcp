@@ -106,33 +106,53 @@ func clickCommentTab(page *rod.Page) error {
 //	  .action-reply / .action-like        (操作按钮)
 func extractCommentNotifications(page *rod.Page, limit int) ([]CommentNotification, error) {
 	result, err := page.Eval(fmt.Sprintf(`() => {
+		// 多种容器选择器，适配不同版本的 DOM 结构
+		const selectors = [
+			'.tabs-content-container > .container',
+			'.notification-page .container',
+			'.notification-list > *',
+			'[class*="notify"] .container',
+			'[class*="comment-list"] > *',
+		];
+
+		let items = [];
+		let matchedSelector = '';
+		for (const sel of selectors) {
+			items = document.querySelectorAll(sel);
+			if (items.length > 0) {
+				matchedSelector = sel;
+				break;
+			}
+		}
+
+		if (items.length === 0) return JSON.stringify({error: 'no_match', debug: dumpPageStructure()});
+
 		const notifications = [];
-		const items = document.querySelectorAll('.tabs-content-container > .container');
 		const limit = %d;
 
 		for (let i = 0; i < items.length && (limit <= 0 || i < limit); i++) {
 			const item = items[i];
 
-			const userEl = item.querySelector('.user-info a');
+			// 用户名: 多种选择器 fallback
+			const userEl = item.querySelector('.user-info a') || item.querySelector('[class*="user"] a') || item.querySelector('.name a');
 			const userName = userEl ? userEl.textContent.trim() : '';
 
-			const avatarEl = item.querySelector('img.avatar-item');
+			const avatarEl = item.querySelector('img.avatar-item') || item.querySelector('[class*="avatar"] img') || item.querySelector('img.avatar');
 			const userAvatar = avatarEl ? avatarEl.src : '';
 
-			const contentEl = item.querySelector('.interaction-content');
+			const contentEl = item.querySelector('.interaction-content') || item.querySelector('[class*="content"]:not([class*="container"])');
 			const content = contentEl ? contentEl.textContent.trim() : '';
 
-			const hintEl = item.querySelector('.interaction-hint span');
+			const hintEl = item.querySelector('.interaction-hint span') || item.querySelector('[class*="hint"] span');
 			const hint = hintEl ? hintEl.textContent.trim() : '';
 			const isReply = hint.includes('回复');
 
-			const quoteEl = item.querySelector('.quote-info');
+			const quoteEl = item.querySelector('.quote-info') || item.querySelector('[class*="quote"]');
 			const noteTitle = quoteEl ? quoteEl.textContent.trim() : '';
 
-			const timeEl = item.querySelector('.interaction-time');
+			const timeEl = item.querySelector('.interaction-time') || item.querySelector('[class*="time"]');
 			const time = timeEl ? timeEl.textContent.trim() : '';
 
-			// 从笔记封面链接提取 noteId
 			const linkEl = item.querySelector('a[href*="/explore/"], a[href*="/discovery/item/"], .extra a');
 			let noteId = '';
 			if (linkEl) {
@@ -156,7 +176,25 @@ func extractCommentNotifications(page *rod.Page, limit int) ([]CommentNotificati
 				});
 			}
 		}
-		return JSON.stringify(notifications);
+		return JSON.stringify({notifications: notifications, selector: matchedSelector});
+
+		// DOM 结构 dump，选择器全部不匹配时用于远程调试
+		function dumpPageStructure() {
+			const page = document.querySelector('.notification-page') || document.querySelector('#app');
+			if (!page) return 'NO_PAGE';
+			function walk(el, depth) {
+				if (depth > 3 || !el || !el.tagName) return '';
+				const tag = el.tagName.toLowerCase();
+				const cls = el.className && typeof el.className === 'string' ? el.className.split(' ').filter(c=>c).slice(0,3).join('.') : '';
+				const children = el.children.length;
+				let line = '  '.repeat(depth) + tag + (cls ? '.'+cls : '') + '[' + children + ']\n';
+				for (let i = 0; i < Math.min(children, 10); i++) {
+					line += walk(el.children[i], depth+1);
+				}
+				return line;
+			}
+			return walk(page, 0);
+		}
 	}`, limit))
 
 	if err != nil {
@@ -164,13 +202,38 @@ func extractCommentNotifications(page *rod.Page, limit int) ([]CommentNotificati
 	}
 
 	jsonStr := result.Value.Str()
-	if jsonStr == "" || jsonStr == "[]" {
+	if jsonStr == "" {
 		return nil, fmt.Errorf("未找到通知列表元素")
 	}
 
-	var notifications []CommentNotification
-	if err := json.Unmarshal([]byte(jsonStr), &notifications); err != nil {
+	// 解析结果，可能是 {error, debug} 或 {notifications, selector}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
 		return nil, fmt.Errorf("解析通知数据失败: %w", err)
+	}
+
+	// 选择器全部不匹配时，返回 debug 信息
+	if _, hasError := raw["error"]; hasError {
+		debugInfo := ""
+		if d, ok := raw["debug"]; ok {
+			json.Unmarshal(d, &debugInfo)
+		}
+		logrus.Warnf("通知页 DOM 选择器未匹配，页面结构:\n%s", debugInfo)
+		return nil, fmt.Errorf("未找到通知列表元素，可能小红书更新了页面结构，debug 信息已输出到日志")
+	}
+
+	// 正常解析
+	if matchedSel, ok := raw["selector"]; ok {
+		var sel string
+		json.Unmarshal(matchedSel, &sel)
+		logrus.Infof("通知列表匹配选择器: %s", sel)
+	}
+
+	var notifications []CommentNotification
+	if notifData, ok := raw["notifications"]; ok {
+		if err := json.Unmarshal(notifData, &notifications); err != nil {
+			return nil, fmt.Errorf("解析通知数据失败: %w", err)
+		}
 	}
 
 	return notifications, nil
@@ -276,9 +339,17 @@ func findNotificationComment(page *rod.Page, commentID string) (*rod.Element, er
 		indexStr := commentID[4:]
 		var index int
 		if _, err := fmt.Sscanf(indexStr, "%d", &index); err == nil {
-			items, err := page.Elements(".tabs-content-container > .container")
-			if err == nil && index < len(items) {
-				return items[index], nil
+			// 多种容器选择器 fallback
+			containerSelectors := []string{
+				".tabs-content-container > .container",
+				".notification-page .container",
+				".notification-list > *",
+			}
+			for _, sel := range containerSelectors {
+				items, err := page.Elements(sel)
+				if err == nil && index < len(items) {
+					return items[index], nil
+				}
 			}
 		}
 		return nil, fmt.Errorf("未找到评论: %s", commentID)
